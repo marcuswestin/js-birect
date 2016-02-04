@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package wire;
+
+enum DataType {
+	NONE = 0;
+	Text = 1;
+	JSON = 2;
+	Proto = 3;
+}
+
+message Wrapper {
+	oneof content {
+		Message  message  = 1;
+		Request  request  = 2;
+		Response response = 3;
+	}
+}
+
+message Message {
+	DataType type = 1;
+	// 2 left out
+	string   name = 3;
+	bytes    data = 4;
+}
+
+message Request {
+	DataType type   = 1;
+	uint32   req_id = 2;
+	string   name   = 3;
+	bytes    data   = 4;
+}
+
+message Response {
+	DataType type     = 1;
+	uint32   req_id   = 2;
+	bool     is_error = 3;
+	bytes    data     = 4;
+}
