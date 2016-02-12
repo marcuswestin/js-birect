@@ -39,6 +39,12 @@ test('Start server 2', function() {
 			resolve({ Text:req.Text })
 		})
 	})
+	birectServer.handleProtoReq('Echo', function(data) {
+		var params = protos.EchoReq.decode(data)
+		return new Promise((resolve) => {
+			resolve(new protos.EchoRes({ text:params.text }))
+		})
+	})
 })
 
 test('Echo client 2', function() {
@@ -46,3 +52,20 @@ test('Echo client 2', function() {
 	var res = await(c.sendJSONReq("Echo", { Text:"Foo" }))
 	assert(res.Text == 'Foo')
 })
+
+test('Proto echo client 2', function() {
+	var c = await(client.connect("ws://localhost:"+(port + 1)+"/birect/upgrade"))
+	var data = await(c.sendProtoReq("Echo", new protos.EchoReq({ text:'Foo' })))
+	var res = protos.EchoRes.decode(data)
+	assert(res.text == 'Foo')
+})
+
+// Misc
+///////
+
+var protos = require('protobufjs').loadProto(`
+	syntax = "proto3";
+	package protos;
+	message EchoReq { string text = 1; };
+	message EchoRes { string text = 1; };
+`).build('protos')

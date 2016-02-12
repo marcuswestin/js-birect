@@ -8,16 +8,16 @@ module.exports = {
 	newConn: newConn
 }
 
-function newConn(logPrefix, wsConn, jsonReqHandlerMap) {
+function newConn(logPrefix, wsConn, jsonReqHandlerMap, protoReqHandlerMap) {
+	var handlerMaps = {}
+	handlerMaps[wire.DataType.JSON] = (jsonReqHandlerMap || {})
+	handlerMaps[wire.DataType.Proto] = (protoReqHandlerMap || {})
 	return create(connBase, {
 		_lastReqId: 0,
 		_responsePromises: {},
 		_wsConn: wsConn,
 		_logPrefix: logPrefix,
-		// JSON API
-		_jsonReqHandlerMap: jsonReqHandlerMap || {},
-		// Proto API
-		
+		_handlerMaps: handlerMaps,
 	})._setup()
 }
 
@@ -28,37 +28,23 @@ var connBase = {
 	
 	sendJSONReq: function(name, params) {
 		var data = new Buffer(JSON.stringify(params), 'utf8')
-		var reqId = this._nextReqId()
-		var wireReq = new wire.Request({ type:wire.DataType.JSON, name:name, reqId:reqId, data:data})
-		return this._sendRequestAndWaitForResponse(reqId, wireReq)
+		return this._sendRequestAndWaitForResponse(name, wire.DataType.JSON, data)
 	},
 	handleJSONReq: function(name, handlerFn) {
-		if (this._jsonReqHandlerMap[name]) {
-			throw new Error('JSON request handler already exists for '+name)
-		}
-		this._jsonReqHandlerMap[name] = handlerFn
-	},
-	_handleIncomingJSONReq: function(wireReq) {
-		var handler = this._jsonReqHandlerMap[wireReq.name]
-		var params = JSON.parse(wireReq.data.toBuffer())
-		handler(params).then(
-			(res) => {
-				var data = new Buffer(JSON.stringify(res), 'utf8')
-				this._sendResponse(wire.DataType.JSON, wireReq.reqId, data)
-			},
-			(err) => {
-				this._sendResponseError(wireReq.reqId, err)
-			}
-		).catch((err) => {
-			this._log("ERROR SENDING RESPONSE", err)
-		})
+		this._registerHandler(wire.DataType.JSON, name, handlerFn)
 	},
 	
 	// Proto API
 	////////////
 	
-	// TODO
-
+	sendProtoReq: function(name, protoMessage) {
+		var data = protoMessage.encode().toBuffer()
+		return this._sendRequestAndWaitForResponse(name, wire.DataType.Proto, data)
+	},
+	handleProtoReq: function(name, handlerFn) {
+		this._registerHandler(wire.DataType.Proto, name, handlerFn)
+	},
+	
 	// Internal - outgoing wires
 	////////////////////////////
 	
@@ -67,7 +53,9 @@ var connBase = {
 		return this._lastReqId
 	},
 
-	_sendRequestAndWaitForResponse: function(reqId, wireReq) {
+	_sendRequestAndWaitForResponse: function(name, wireType, data) {
+		var reqId = this._nextReqId()
+		var wireReq = new wire.Request({ reqId:reqId, name:name, type:wireType, data:data })
 		return new Promise((resolve, reject) => {
 			this._responsePromises[reqId] = { resolve:resolve, reject:reject }
 			this._log("REQ", wireReq.name, "ReqId:", reqId, "len:", wireReq.data.buffer.length)
@@ -75,8 +63,9 @@ var connBase = {
 		})
 	},
 	
-	_sendResponse: function(type, reqId, data) {
+	_sendResponse: function(reqId, type, res) {
 		this._log("SEND RES", reqId)
+		var data = this._encode(type, res)
 		var wireRes = new wire.Response({ type:type, reqId:reqId, data:data })
 		this._sendWrapper(new wire.Wrapper({ response:wireRes }))
 	},
@@ -120,43 +109,72 @@ var connBase = {
 			case 'response':
 				return this._handleResponse(wireWrapper.response)
 			default:
-				throw new Error('Bad wirewrapper:', wireWrapper)
+				this._log('Bad wirewrapper:', wireWrapper)
+				throw new Error('Bad wirewrapper: ' + wireWrapper)
 		}
 	},
 	
+	// Internal - encode/decode
+	///////////////////////////
+	_encode: function(dataType, data) {
+		switch(dataType) {
+			case wire.DataType.JSON:
+				return new Buffer(JSON.stringify(data), 'utf8')
+			case wire.DataType.Proto:
+				return data.encode().toBuffer()
+			default:
+				throw new Error('Bad data type')
+		}
+	},
+	_decode: function(dataType, data) {
+		switch(dataType) {
+			case wire.DataType.JSON:
+				return JSON.parse(data.toBuffer())
+			case wire.DataType.Proto:
+				return data
+			default:
+				throw new Error('Bad data type')
+		}		
+	},
+
+	
 	// Internal - incoming wires
 	////////////////////////////
+	_registerHandler: function(wireType, name, handlerFn) {
+		if (this._handlerMaps[wireType][name]) {
+			throw new Error('JSON request handler already exists for '+name)
+		}
+		this._handlerMaps[wireType][name] = handlerFn
+	},
+	_handleRequest: function(wireReq) {
+		this._log('REQ', wireReq.reqId)
+		var handler = this._handlerMaps[wireReq.type][wireReq.name]
+		var params = this._decode(wireReq.type, wireReq.data)
+		handler(params).then(
+			(res) => {
+				this._sendResponse(wireReq.reqId, wireReq.type, res)
+			},
+			(err) => {
+				this._sendResponseError(wireReq.reqId, err)
+			}
+		)
+	},
 	_handleResponse: function(wireRes) {
+		this._log('RES', wireRes.reqId)
 		var promise = this._responsePromises[wireRes.reqId]
 		delete this._responsePromises[wireRes.reqId]
-		this._log("RES reqId:", wireRes.reqId, "dataType:", wireRes.type, "len(data):", wireRes.data.buffer.length)
 		if (wireRes.isError) {
 			promise.reject(new Error(wireRes.data))
 			return
 		}
-		switch (wireRes.type) {
-			case wire.DataType.JSON:
-				return promise.resolve(JSON.parse(wireRes.data.toBuffer()))
-			default:
-				throw new Error("Bad response wire type: " + wireRes.type)
-		}
-	},
-	
-	_handleRequest: function(wireReq) {
-		this._log('Handle req:', wireReq.name)
-		switch (wireReq.type) {
-			case wire.DataType.JSON:
-				return this._handleIncomingJSONReq(wireReq)
-			default:
-				throw new Error('Bad request data type: ' + wireReq.type)
-		}
+		var res = this._decode(wireRes.type, wireRes.data)
+		promise.resolve(res)
 	},
 
 	// Internal - misc
 	//////////////////
 
 	_sendWrapper: function(wrapper) {
-		this._log("SND Wrapper...")
 		var wireData = wrapper.toBuffer()
 		this._log("SND Wrapper len:", wireData.length)
 		this._wsConn.sendBytes(wireData)

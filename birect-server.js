@@ -19,9 +19,10 @@ function upgradeRequests(httpServer, path, allowConnection) {
 function _newServer() {
 	return create(serverBase, {
 		_wsServer: null,
-		_jsonReqHandlerMap: {},
 		_connectionsById: {},
 		_lastId: 0,
+		_jsonReqHandlerMap: {},
+		_protoReqHandlerMap: {},
 	})
 }
 
@@ -31,6 +32,12 @@ var serverBase = {
 			throw new Error('JSON request handler already exists for '+name)
 		}
 		this._jsonReqHandlerMap[name] = handlerFn
+	},
+	handleProtoReq: function(name, handlerFn) {
+		if (this._protoReqHandlerMap[name]) {
+			throw new Error('Proto request handler already exists for '+name)
+		}
+		this._protoReqHandlerMap[name] = handlerFn
 	},
 	
 	// Internal
@@ -77,7 +84,7 @@ var serverBase = {
 		}
 	},
 	_onWSConnection: function(wsConn) {
-		wsConn.birectConn = conn.newConn('<server>', wsConn, this._jsonReqHandlerMap)
+		wsConn.birectConn = conn.newConn('<server>', wsConn, this._jsonReqHandlerMap, this._protoReqHandlerMap)
 		wsConn.on('close', function() {
 			delete wsConn.birectConn
 		})
