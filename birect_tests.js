@@ -20,9 +20,7 @@ test('Start server 1', function() {
 	
 	var birectServer = server.upgradeRequests(httpServer, '/birect/upgrade')
 	birectServer.handleJSONReq('Echo', function(req) {
-		return new Promise((resolve) => {
-			resolve({ Text:req.Text })
-		})
+		return Promise.resolve({ Text:req.Text })
 	})
 })
 
@@ -35,15 +33,11 @@ test('Echo client', function() {
 test('Start server 2', function() {
 	var birectServer = server.listenAndServe(port + 1)
 	birectServer.handleJSONReq('Echo', function(req) {
-		return new Promise((resolve) => {
-			resolve({ Text:req.Text })
-		})
+		return Promise.resolve({ Text:req.Text })
 	})
 	birectServer.handleProtoReq('Echo', function(data) {
 		var params = protos.EchoReq.decode(data)
-		return new Promise((resolve) => {
-			resolve(new protos.EchoRes({ text:params.text }))
-		})
+		return Promise.resolve(new protos.EchoRes({ text:params.text }))
 	})
 })
 
