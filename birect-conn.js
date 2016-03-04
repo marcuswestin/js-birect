@@ -23,6 +23,10 @@ function newConn(logPrefix, wsConn, jsonReqHandlerMap, protoReqHandlerMap) {
 
 var connBase = {
 	
+	disconnect: function() {
+		this._wsConn.close()
+	},
+	
 	// JSON API
 	///////////
 	
