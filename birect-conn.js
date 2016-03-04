@@ -62,7 +62,7 @@ var connBase = {
 		var wireReq = new wire.Request({ reqId:reqId, name:name, type:wireType, data:data })
 		return new Promise((resolve, reject) => {
 			this._responsePromises[reqId] = { resolve:resolve, reject:reject }
-			this._log("REQ", wireReq.name, "ReqId:", reqId, "len:", wireReq.data.buffer.length)
+			this._log("SEND REQ", reqId, wireReq.name, "len:", wireReq.data.buffer.length)
 			this._sendWrapper(new wire.Wrapper({ request:wireReq }))
 		})
 	},
@@ -103,7 +103,6 @@ var connBase = {
 			this._log('Bad websocket data type:', wsFrame.type)
 			return
 		}
-		this._log('FRAME')
 		var wireWrapper = wire.Wrapper.decode(wsFrame.binaryData)
 		switch (wireWrapper.content) {
 			case 'message':
@@ -151,7 +150,7 @@ var connBase = {
 		this._handlerMaps[wireType][name] = handlerFn
 	},
 	_handleRequest: function(wireReq) {
-		this._log('REQ', wireReq.reqId)
+		this._log('RECV REQ', wireReq.reqId)
 		var handler = this._handlerMaps[wireReq.type][wireReq.name]
 		var params = this._decode(wireReq.type, wireReq.data)
 		handler(params).then(
@@ -164,13 +163,15 @@ var connBase = {
 		)
 	},
 	_handleResponse: function(wireRes) {
-		this._log('RES', wireRes.reqId)
 		var promise = this._responsePromises[wireRes.reqId]
 		delete this._responsePromises[wireRes.reqId]
 		if (wireRes.isError) {
-			promise.reject(new Error(wireRes.data))
+			var err = new Error(wireRes.data)
+			this._log('RECV ERR', wireRes.reqId, err)
+			promise.reject(err)
 			return
 		}
+		this._log('RECV RES', wireRes.reqId, 'len:', wireRes.data.buffer.length)
 		var res = this._decode(wireRes.type, wireRes.data)
 		promise.resolve(res)
 	},
@@ -180,7 +181,6 @@ var connBase = {
 
 	_sendWrapper: function(wrapper) {
 		var wireData = wrapper.toBuffer()
-		this._log("SND Wrapper len:", wireData.length)
 		this._wsConn.sendBytes(wireData)
 	},
 
