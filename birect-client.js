@@ -5,6 +5,7 @@ module.exports = {
 	connect: connect
 }
 
+var clients = 0
 function connect(url) {
 	return new Promise((resolve, reject) => {
 		var ws = new WebSocket()
@@ -13,7 +14,8 @@ function connect(url) {
 			reject(err)
 		})
 		ws.on('connect', (wsConn) => {
-			resolve(conn.newConn('<client>', wsConn))
+			clients += 1
+			resolve(conn.newConn('<client '+clients+'>', wsConn))
 		})
 	})
 }
